@@ -3,11 +3,12 @@
 
 \documentclass[11pt]{article}
 \usepackage{graphicx}
+\usepackage{verbatim}
 
 \newcommand\CIPH{C\!I\!P\!H_K}
 
-\title{{\bf Comparison of Symmetric Ciphers in OpenSSL} \\ \bigskip \large HW1 - CNS Sapienza}
-\date{2019-11-4}
+\title{{\bf Practicing with an offline dictionary attack} \\ \bigskip \large HW2 - CNS Sapienza}
+\date{2019-11-14}
 \author{Valerio Coretti 1635747}
 \pagenumbering{roman}
 
@@ -15,145 +16,172 @@
 \maketitle
 
 \section{Introduction}
-Data encryption procedures are divided into two categories: {\em Symmetric encryption} and {\em Asymmetric encryption}. These techniques 
-depending on the type of security keys used to encrypt/decrypt. In this paper we focused in Symmetric Encyption. In this type of encyption 
-the sender and the receiver first agree on a secret {\em "shared"} key, then they use this secret key to encrypt and decrypt their messages.
+When we have to encrypt a file we always must be sure that our key was very strong, because nowadays there are many techniques to defeating a cipher.
 
-{\em Block Ciphers} are widely used in symmetric encryption. A block cipher consists of an encryption alghorithm and a decryption algorithm. 
-These alghorithms take a fixed-length messages, called {\em blocks}, a variable-length {\em key}, and through {\em Operating Modes}, generate
-a ciphertext. Modes of operations are the techniques used to encrypt messages larger than a single block.
+However in the most of cases many people have a tendency to choose very simple passwords that are common words or slightly different variants of these, for example string that are obtained by appending a number or a punctuation character.
 
-In the following sections, we will present a fair comparison between four of the most common Block Ciphers: 
-{\em RC2}, {\em DES}, {\em Blowfish} and {\em AES}, based on three different operating modes: {\em CBC}, {\em ECB} and {\em OFB}.
-In particoular we will trie to answer to this question: given a pair (cipher, operating mode) is encryption faster or slower than decryption?
+This type of passwords are vulnerable to a known attack called: {\em Dictionary Attack}.
 
-\section{Preliminary Choices}
-To answer the above question we have chosen to measure the encryption/decryption speeds on files of different sizes: 1MB, 10MB, 100MB, 300MB.
-The main parameter on which we based our analysis is the {\em Average Speed Ratio}.
+A Dictionary attack is a {\em brute-force attack}, this means that it tries all the strings in a pre-arranged listing, typically derived from a list of words, such as a dictionary. Then a dictionary attack is not a real brute force attack, where a large proportion of the key space is searched systematically, but it tries only the string in the dictionary.
 
-$ Average Speed Ratio = (AvgSpeedEncyption)/(AvgSpeedDecryption) $
+There are two types of Dicitionary attack: {\em Offline Dictionary Attack} and {\em Online Dictionary Attack}. The first working offline and eliminates all network related limitations to password guessing. In fact, it looks for all the possibilities in a file stored in the file system. Instead in an online attack, a hacker uses the same interface as a regular user to try to gain access to accounts. In both types all the attacker needs is a curated list of likely passwords.
 
-The average is calculated on five encryption and five decryption of the same file.
-
-Moreover the following table shows the algorithms settings used in this experiment.
+In our project we have a ciphertext that has been encrypted with a definite command that we know:
 
 \bigskip
-\begin{tabular}{ | l | l | l | }
-        \hline
-        \textbf{Cipher} & \textbf{Key Size (Bits)} & \textbf{Block Size (Bits)} \\ \hline
-    AES & 128 & 128  \\ \hline
-    DES & 64 & 64 \\ \hline
-    Blowfish & 128 & 64 \\ \hline
-    RC2 & 128 & 64 \\ \hline
-\end{tabular}
+$ openssl\;enc\;-e\;-aes-192-cbc\;-pbkdf2\;-in\;infile\;-out\;ciphertext $
 \bigskip
 
-The comparison has been conducted with the OpenSSL library using C language with Linux Mint and over an Intel core i5 64bit processor with 4GB of RAM.
+Our goal is, appling the opposite command for every words in the chosen dictionary, to find the right password and relatively plaintext. Then we should simulate the command:
 
-\subsection{OpenSSL: Standard Function vs EVP interface}
+\bigskip
+$ openssl\;enc\;-d\;-aes-192-cbc\;-pbkdf2\;-in\;ciphertext\;-out\;plaintext $
+\bigskip
+
+In the following sections we will see a simplify implementation of an offline dictionary attack in C code using OpenSSL Open-Source library, with Linux Mint and over an Intel core i5 64bit processor with 4GB of RAM.
+
+\section{Preliminary Settings}
+Being a brute-force attack if we don't say anything about what we want to decrypt and how it has been encrypted, it is very hard to attack it. But luckily in our case we have precise preliminary data given by the command above. Analyze it:
+
+\begin{itemize}
+\item {\em "openssl enc -e"}: invokes the openssl tool to encrypt and decrypt files, in our case -e indicates that we are encrypting a file.
+\item {\em "-aes-192-cbc"}: indicates that to perform encryption we are using the AES algorithm with CBC operating mode and 192 key bits.
+\item {\em "-pbkdf2"}: algorithm that derives a key from the input password (see the following section)
+\item {\em "-in"} e {\em "-out"}: input file to encrypt and output file for ciphertext
+\end{itemize}
+
+In this command we can add other operands to set all the encrypt parameters to our liking, such as we can set the digest with {\em -dgst}, the salt with {\em -salt}, or the iteration for pbkdf2 function with {\em -iter}. If we don't set any parameters, openssl uses the default ones. OpenSSL documentation doesn't say anything about the default parameters then for derives it we use the source code wich is available at the path: {\em https://github.com/openssl/openssl/apps/enc.c}.
+
+Then for our command we have the following default parameters:
+\begin{itemize}
+\item {\em "Digest"} = sha256
+\item {\em "iter"} = 10000
+\item {\em "Salt"}: the salt is 8 bytes string, it is generated randomly and it is in the first 8 bytes of the ciphertext after the string "Salted\_\_". Obviously if we repeat the encryption the salt changes but for decryption just take it from the ciphertext.
+\end{itemize}
+
+\begin{figure}[!ht]
+  \includegraphics[width=1\textwidth]{pic1-hw2-1635747}
+  \label{fig:Salt extraction}
+\end{figure}
+
+As we see in the figure after extracting the salt we move the pointer of ciphertext by 16 bytes, this because we don't want decrypt the salt (Remember: in the first 8 bytes we have the string "Salted\_\_", in the second 8 bytes we have the salt)
+
+Now that we have our parameters we are ready to derive the key.
+
+\subsection{PBKDF2 algorithm}
+Is a key derivation algorithm with a sliding computational cost, used to reduce vulnerabilities to brute force attacks. It applies a pseudorandom function,  such as hash-based message authentication code (HMAC), to the input password along with a salt value and repeats the process many times to produce a derived key. The added computational work makes password cracking much more difficult, and is known as {\em key stretching}.
+The PBKDF2 key derivation function has five input parameters:
+
+\bigskip
+$ DK = PBKDF2(PRF, Password, Salt, iter, dkLen) $
+\bigskip
+
+where the only parameter we don't know is PRF that is the pseudorandom function applied. OpenSSL use HMAC with sha256 digest as default. This is why it was important to study the default parameters, without these in our code we could not have applied the pbkdf2 function. In C we have implemented pbkdf2 as follow:
+
+\begin{figure}[!ht]
+  \includegraphics[width=1\textwidth]{pic2-hw2-1635747}
+  \label{fig:pbkdf2 implementation}
+\end{figure}
+\newpage
+
+We took this function directly from the openssl documentation. Note that we did not talk about the initialization vector, but we just need to know that if it is not specified this is generated together with the key.
+
+\subsection{Plaintext Checking}
+Another important thing that we know is that the original plaintext is an {\em english} text and the encryption password is a {\em meaningful english word}. This two data is very important because reduce our dictionaries research, in fact all we need is a basic english dictionary.
+
+Said that, once the file has been decrypted we have to check the result. For doing tihs we use two tests: first, if openssl returns a {\em bad decrypt} error in the decryption, then we discard that word, otherwise we take the resulting plaintext and check if it is ascii. In code we have a function called {\em decrypt} that return -1 if there was an error, then we have a function that return 1 if plaintext is ascii, 0 otherwise.
+
+\begin{figure}[!ht]
+  \includegraphics[width=1\textwidth]{pic3-hw2-1635747}
+  \label{fig:Ascii check}
+\end{figure}
+
+\subsection{Chosen Dictionary}
+For our attack we test two different dictionary. The first contains 84000 ordered words from
+
+http://www.gwicks.net/dictionaries.htm \newline and the second contains 10000 ordered words from
+
+https://www.mit.edu/~ecprice/wordlist.10000.
+
+Then for analyze the result we report the time for decrypting and the time in the worst case.
+
+\section{Experimentation}
+\begin{figure}[!ht]
+  \includegraphics[width=1\textwidth]{pic4-hw2-1635747}
+  \label{fig:Dictionary attack}
+\end{figure}
+
+This is our dictionary attack. Simply it reads line by line the dictionary, discard the newline char, and check if it is the right password, then print the plaintext.
+
+The right password is: {\em learning}
+
+and the plain text is:
 \begin{quote}
-OpenSSL is a software library for applications that secure communications over computer networks against eavesdropping or need to 
-identify the party at the other end. {\em Wikipedia}
+To be, or not to be: that is the question:
+Whether 'tis nobler in the mind to suffer
+The slings and arrows of outrageous fortune,
+Or to take arms against a sea of troubles,
+And by opposing end them? To die: to sleep;
+No more; and by a sleep to say we end
+The heart-ache and the thousand natural shocks
+That flesh is heir to, 'tis a consummation
+Devoutly to be wish'd. To die, to sleep;
+To sleep: perchance to dream: ay, there's the rub;
+For in that sleep of death what dreams may come
+When we have shuffled off this mortal coil,
+Must give us pause: there's the respect
+That makes calamity of so long life;
+For who would bear the whips and scorns of time,
+The oppressor's wrong, the proud man's contumely,
+The pangs of despised love, the law's delay,
+The insolence of office and the spurns
+That patient merit of the unworthy takes,
+When he himself might his quietus make
+With a bare bodkin? who would fardels bear,
+To grunt and sweat under a weary life,
+But that the dread of something after death,
+The undiscover'd country from whose bourn
+No traveller returns, puzzles the will
+And makes us rather bear those ills we have
+Than fly to others that we know not of?
+Thus conscience does make cowards of us all;
+And thus the native hue of resolution
+Is sicklied o'er with the pale cast of thought,
+And enterprises of great pith and moment
+With this regard their currents turn awry,
+And lose the name of action.--Soft you now!
+The fair Ophelia! Nymph, in thy orisons
+Be all my sins remember'd.
 \end{quote}
-This library has two main sets of function to perform the various cipher algorithms with the related operating modes: 
-{\em Standard Function} and {\em EVP interface}. Standard Function are the first set of instructions released by openssl 
-and in fact, as we will see, these are slow and not optimized, especially with cipher AES and CBC mode. Instead the EVP functions 
-provide a high level interface to cryptographic functions. 
 
-In this paper first we will discuss the results with the standard functions and then we will see the improvements obtained with EVP.
+As a first attempt we tries with the dictionary of 84000 words and to get right password and relatively plaintext it takes 514.127709 seconds, about 9 minutes. This means that in the worst case where the alghorithm has to scan all the words it take about 18 minutes, because the right password is just after the half.
 
-\section{Evaluation Methodology}
-We have used two Simulations Programs, one for Standard Function and one for EVP. Both take one input parameter that are the file to encrypt and 
-returns all the times-speed for evrey ciphers and related operating modes. Key and IV used is pseudo-randomly generated. Example of output (only for AES):
+Instead with the dictionary of 10000 words we are still arriving at the right result with 61.469973 seconds, about 1 minute and in the worst case it takes 2 minutes. This is a very nice result. Now we are ready to draw our conclusions.
 
-\begin{figure}[!ht]
-  \includegraphics[width=1\textwidth]{pic1-hw1-1635747}
-  \label{fig:Example of output with EVP}
-\end{figure}
-
-\newpage
-\section{Simulation Results}
-This section will discuss graphics results obtained from running the simulation program for Standard functions and EVP. We will show graphics 
-three different graphics, one for every operating modes.
-
-\subsection{Standard functions results}
-We begin our analysis with CBC. From the graph we immediately notice a surprising thing: AES has the worst speed ratio of all since it is far 
-less than 1. This means that AES with CBC takes longer to decrypt than to encrypt, but as we have also seen during the course this 
-is not possible since CBC provide the parallelization in the decryption process and therefore this should be faster than the encryption. 
-
-ECB instead provides parallelization in both encryption and decryption but according to our results AES behaves in the same way as seen with CBC. 
-This is really a strange anomaly. Finally we see that, as expected, with OFB, AES behaves correctly using almost the same time for both 
-decryption and encryption.
-
-For the other ciphers the results are more or less what we expected to see. DES provides the same times for both encryption and decryption 
-as Blowfish, though it is worth remembering that the latter is much faster than DES and slightly slower than AES. RC2 is by far the worst cipher 
-in terms of speed and as we see from the results it uses about half in the decryption compared to encryption.
-
-\begin{figure}[!ht]
-  \includegraphics[width=1\textwidth]{pic2-hw1-1635747}
-  \label{fig:Standard functions result}
-\end{figure}
-
-\subsection{EVP results}
-Let's now analyze the results obtained with EVP.
-The first graph immediately shows us a substantial difference with the previous results, the speed ratio of AES with CBC is close to 2,5. 
-This is a much more accurate and real result than the one seen previously.
-
-What happens when changing from CBC to ECB is the same result, ie AES with the ECB mode takes the same time both to decrypt and to encrypt.
-Finally we can see from the last graph that with OFB the speed ratio of the 4 ciphers does not change with respect to before, and this makes 
-us feel a little quiter. In the next section we will explain the reason for these improvements in AES performance using the EVP interface and finally in the 
-conclusion we will try to answer the initial question.
-
-\subsubsection{Why EVP is the right way}
-As we said at the beginning, evp is a high level interface. In fact from the results seen, the performances improve.
-But this happens above all for AES, why? Because EVP takes advantage of the AES-NI native instructions. To understand how AES-NI works, 
-you need to think thet to implement a crypto algorithm, we usually just express a combination 
-of such basic operations additions, multiplications, XORs, and so on, and the microprocessor activates its adders, multipliers, and XOR circuits 
-in the prescribed order. AES native instructions take this to a whole new level by providing developers with dedicated assembly instructions that 
-compute AES. Instead of coding an AES round as a sequence of assembly instructions, when using AES-NI, you just call the instruction AESENC and 
-the chip will compute the round for you. Native instructions allow you to just tell the processor to run an AES round instead of requiring you to 
-program rounds as a combination of basic operations.
-In fact running the simulation program we can see also that the speed of AES is higher than that with the standard functions. 
-About the speed ratio evp is optimized and implements the parallelization of operations.
-
-\begin{figure}[!ht]
-  \includegraphics[width=1\textwidth]{pic3-hw1-1635747}
-  \label{fig:CBC result- EVP interface}
-\end{figure}
-\begin{figure}
-  \includegraphics[width=1\textwidth]{pic4-hw1-1635747}
-  \label{fig:ECB result- EVP interface}
-\end{figure}
-\begin{figure}
-  \includegraphics[width=1\textwidth]{pic5-hw1-1635747}
-  \label{fig:OFB result- EVP interface}
-\end{figure}
-
-\newpage
 \section{Conclusion}
-Everything we have seen brings us to the following considerations: when you decide to encrypt or decrypt a file using openssl it is always 
-good to use the EVP interface because it increases performance and is optimized for AES.
-Comparing the different ciphers we have seen that AES is by far the fastest, after which in order we find Blowfish DES and RC2. 
-The latter is the one that has the worst performance. By changing the operating modes the speed ratio changes, in particular CBC makes 
-the decryption faster, especially for AES, while OFB takes the same time both to decrypt and to encrypt whatever is the cipher used.
-ECB is the fastest of the three.
-Finally, changing the file size does not change the results significantly.
+This experiment tells us that encrypting a message with a common password is almost useless because even a simple algorithm like this can decrypt it and find the password in about 2 minutes.
+
+The algorithm presented is really very simple and specific for the preliminary data we had, but it is enough to think that putting a char non ascii at the beginning of the plaintext this algorithm would never reach the right solution. However in most cases when we exchange messages we don't care about these details, but we only enter a password. So it's important to always try to enter a password that is never a common word.
+
+About the algorithm time we have seen that this depends on the chosen dictionary, in this case even a small dictionary of 10000 words returns the right result. In other problems we could be dealing with dictionaries that could exceed even a million words, in this case the algorithm could be improved by splitting the dictionary into several parts and parallelizing the execution.
 
 \begin{thebibliography}{99}
 
 \bibitem{wiki}
-{\em Block cipher mode of operation - Wikipedia}.
-  \verb|https://en.wikipedia.org/wiki/Block_cipher_mode_of_operation|
-  \newblock Accessed: 2019-11-4.
+{\em PBKDF2 - Wikipedia}.
+  \verb|https://en.wikipedia.org/wiki/PBKDF2|
 
-\bibitem{book}
-Jean - Philippe Aumasson.
-  {\em SERIOUS CRYPTOGRAPHY A Practical Introduction to Modern Encryption.}
-  Copyright © 2018 by Jean-Philippe Aumasson.
+\bibitem{wiki}
+{\em Dictionary Attack - Wikipedia}.
+  \verb|https://en.wikipedia.org/wiki/Dictionary_attack|
 
 \bibitem{link}
-OpenSSL Documentation. 
-{\em https://www.openssl.org/docs/manmaster/man3/}
+OpenSSL Documentation.
+\verb|https://www.openssl.org/docs/manmaster/man3/|
+
+\bibitem{link}
+OpenSSL GitHub Repository.
+\verb|https://github.com/openssl/openssl|
 
 \end{thebibliography}
 
